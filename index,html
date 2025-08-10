@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dynamic Form Builder</title>
+  <style>
+    /* ---------- Tailored modern UI (no external libs) ---------- */
+    :root{
+      --bg:#0f1724; --card:#0b1220; --muted:#9aa4b2; --accent:#60a5fa; --accent-2:#7c3aed;
+      --glass: rgba(255,255,255,0.04);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071027 0%, #071a2b 60%);color:#e6eef6}
+    .app{max-width:1200px;margin:28px auto;padding:20px;display:grid;grid-template-columns: 360px 1fr;gap:18px}
+    .panel{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:14px;padding:18px;box-shadow: 0 6px 18px rgba(2,6,23,0.6);border:1px solid rgba(255,255,255,0.03)}
+    header{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin-bottom:6px}
+    h1{font-size:20px;margin:0}
+    .nav{margin-left:auto;display:flex;gap:8px}
+    .btn{background:var(--accent);padding:8px 12px;border-radius:10px;color:#04243a;border:none;cursor:pointer;font-weight:600}
+    .btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);}
+    .muted{color:var(--muted)}
+
+    /* Left builder */
+    .left{display:flex;flex-direction:column;gap:12px}
+    .field-list{display:flex;flex-direction:column;gap:8px;max-height:64vh;overflow:auto;padding-right:6px}
+    .field-card{display:flex;align-items:center;gap:12px;padding:10px;border-radius:10px;background:var(--glass);border:1px solid rgba(255,255,255,0.02);}
+    .field-card.dragging{opacity:0.6}
+    .field-meta{flex:1}
+    .small{font-size:12px;color:var(--muted)}
+    .controls{display:flex;gap:6px}
+    .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:6px;border-radius:8px;color:var(--muted);cursor:pointer}
+
+    /* Right area */
+    .right{display:flex;flex-direction:column;gap:12px}
+    .stage{min-height:60vh;padding:16px;border-radius:10px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.03)}
+    .form-preview{max-width:780px}
+    label{display:block;margin-bottom:6px;font-weight:600}
+    input[type=text], input[type=number], textarea, select, input[type=date]{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);color:inherit}
+    .row{display:flex;gap:8px}
+    .two{grid-template-columns:1fr 1fr}
+
+    /* modal */
+    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:linear-gradient(180deg, rgba(2,6,23,0.6), rgba(2,6,23,0.8));}
+    .modal.show{display:flex}
+    .modal .card{width:720px}
+
+    /* responsive */
+    @media (max-width:980px){.app{grid-template-columns:1fr;}.nav{display:none}}
+
+    /* small helpers */
+    .muted-pill{background:rgba(255,255,255,0.02);padding:6px 8px;border-radius:999px;font-size:12px;color:var(--muted)}
+    .flex{display:flex;gap:8px;align-items:center}
+    .danger{background:#ff5c5c;color:white}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36'><rect width='36' height='36' rx='8' fill='%2360a5fa'/></svg>" alt="logo" style="border-radius:8px">
+      <div>
+        <h1>Dynamic Form Builder</h1>
+        <div class="muted">Advanced UI & UX. localStorage persistence</div>
+      </div>
+      <div class="nav">
+        <button class="btn" data-route="#create">Create</button>
+        <button class="btn secondary" data-route="#preview">Preview</button>
+        <button class="btn secondary" data-route="#myforms">My Forms</button>
+      </div>
+    </header>
+
+    <!-- left: Builder panel -->
+    <div class="panel left" id="builderPanel">
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="flex:1">
+          <div class="muted-pill">Add Field</div>
+        </div>
+        <select id="addFieldType" style="padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)">
+          <option value="text">Text</option>
+          <option value="number">Number</option>
+          <option value="textarea">Textarea</option>
+          <option value="select">Select</option>
+          <option value="radio">Radio</option>
+          <option value="checkbox">Checkbox</option>
+          <option value="date">Date</option>
+        </select>
+        <button id="addFieldBtn" class="btn">Add</button>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input id="formName" placeholder="Form name..." style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit">
+        <button id="saveFormBtn" class="btn secondary">Save</button>
+      </div>
+
+      <div style="margin-top:12px" class="small muted">Drag to reorder fields. Click edit (⚙) to configure field details and validations. Mark a field as <b>Derived</b> to compute from parents.</div>
+
+      <div id="fields" class="field-list" style="margin-top:12px"></div>
+    </div>
+
+    <!-- right: Preview + stage -->
+    <div class="panel right" id="stagePanel">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="small muted">Route: <span id="currentRoute">/create</span></div>
+        <div class="flex"><button id="openPreviewBtn" class="btn">Open Preview</button><button id="openFormsBtn" class="btn secondary">My Forms</button></div>
+      </div>
+
+      <div class="stage" id="stage">
+        <!-- dynamic content inserted here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- modal: field editor -->
+  <div id="modal" class="modal">
+    <div class="card panel">
+      <h3 id="modalTitle">Edit Field</h3>
+      <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr;align-items:start">
+        <div>
+          <label>Label</label>
+          <input id="f_label" type="text">
+          <label style="margin-top:8px">Key (unique)</label>
+          <input id="f_key" type="text">
+          <label style="margin-top:8px">Type</label>
+          <select id="f_type"><option>text</option><option>number</option><option>textarea</option><option>select</option><option>radio</option><option>checkbox</option><option>date</option></select>
+        </div>
+        <div>
+          <label>Validations</label>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+            <label><input id="v_required" type="checkbox"> Required</label>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+            <label>Min length <input id="v_minlen" type="number" style="width:80px;margin-left:6px"></label>
+            <label>Max length <input id="v_maxlen" type="number" style="width:80px;margin-left:6px"></label>
+          </div>
+          <div style="margin-top:8px">
+            <label>Email format <input id="v_email" type="checkbox" style="margin-left:8px"></label>
+          </div>
+          <div style="margin-top:8px">
+            <label>Custom password rule <input id="v_password" type="checkbox" style="margin-left:8px"></label>
+            <div class="small muted">(min 8 chars & must contain number)</div>
+          </div>
+
+          <label style="margin-top:10px">Default value</label>
+          <input id="f_default" type="text">
+
+          <label style="margin-top:10px">Derived field</label>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+            <label><input id="f_derived" type="checkbox"> Is Derived</label>
+          </div>
+          <label class="small muted" style="margin-top:8px">If derived: select parents (comma separated keys) and expression</label>
+          <input id="f_parents" placeholder="e.g. dob" style="margin-top:6px">
+          <input id="f_expr" placeholder="Expression e.g. Math.floor((now - Date.parse({dob}))/31557600000)" style="margin-top:6px">
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button id="deleteFieldBtn" class="btn secondary">Delete</button>
+        <button id="closeModalBtn" class="btn">Close</button>
+        <button id="saveFieldBtn" class="btn">Save Field</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- modal: myforms list -->
+  <div id="formsModal" class="modal">
+    <div class="card panel" style="width:760px">
+      <h3>Saved Forms</h3>
+      <div id="savedFormsList" style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow:auto"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button id="closeFormsModal" class="btn">Close</button></div>
+    </div>
+  </div>
+
+  <script type="module">
+  /**
+   * Dynamic Form Builder — Single-file implementation
+   * Features implemented:
+   * - Add fields of many types
+   * - Edit field config + validations
+   * - Derived fields via an expression with placeholders {key}
+   * - Drag-and-drop reordering
+   * - Save form schema to localStorage (list & preview)
+   * - Preview: shows form, validations, derived fields auto-update
+   */
+
+  const STORAGE_KEY = 'uf_forms_v1';
+
+  // app state: current building schema
+  let state = {
+    route: 'create',
+    schema: {name:'Untitled', fields:[]},
+    editingIndex: -1
+  };
+
+  // utilities
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+  function genId(prefix='f'){return prefix + '_' + Math.random().toString(36).slice(2,9)}
+
+  function loadForms(){
+    try{const raw = localStorage.getItem(STORAGE_KEY); return raw? JSON.parse(raw): []}catch(e){console.error(e); return []}
+  }
+  function saveForms(list){ localStorage.setItem(STORAGE_KEY, JSON.stringify(list)) }
+
+  // initial hookup
+  function init(){
+    // nav buttons
+    $$('[data-route]').forEach(btn=>btn.addEventListener('click', ()=>{location.hash = btn.dataset.route}))
+    window.addEventListener('hashchange', onHashChange);
+    $('#addFieldBtn').addEventListener('click', onAddField);
+    $('#saveFormBtn').addEventListener('click', onSaveForm);
+    $('#openPreviewBtn').addEventListener('click', ()=>location.hash='#preview');
+    $('#openFormsBtn').addEventListener('click', ()=>location.hash='#myforms');
+    $('#closeModalBtn').addEventListener('click', closeModal);
+    $('#saveFieldBtn').addEventListener('click', onSaveField);
+    $('#deleteFieldBtn').addEventListener('click', onDeleteField);
+    $('#addFieldType').value = 'text';
+
+    $('#closeFormsModal').addEventListener('click', ()=>$('#formsModal').classList.remove('show'));
+
+    renderBuilder();
+    onHashChange();
+  }
+
+  // ---------- Builder functions ----------
+  function onAddField(){
+    const t = $('#addFieldType').value;
+    const keyBase = t.slice(0,4);
+    const key = genId(keyBase);
+    const field = {
+      id: genId('fld'), key, label: key, type: t, default:'', required:false,
+      validations:{minlen:null,maxlen:null,email:false,password:false},
+      derived:false, parents:[], expr:''
+    };
+    state.schema.fields.push(field);
+    renderBuilder();
+  }
+
+  function renderBuilder(){
+    $('#formName').value = state.schema.name || '';
+    const fieldsEl = $('#fields'); fieldsEl.innerHTML = '';
+    state.schema.fields.forEach((f, idx)=>{
+      const card = document.createElement('div'); card.className='field-card'; card.draggable=true; card.dataset.index=idx;
+      card.innerHTML = `
+        <div style="width:8px;height:40px;border-radius:6px;background:linear-gradient(180deg,var(--accent),var(--accent-2));margin-right:8px"></div>
+        <div class='field-meta'>
+          <div style='display:flex;gap:8px;align-items:center'>
+            <div style='font-weight:700'>${escapeHtml(f.label)}</div>
+            <div class='small muted'>${f.type}${f.derived? ' • derived':''}</div>
+          </div>
+          <div class='small muted'>key: ${escapeHtml(f.key)}</div>
+        </div>
+        <div class='controls'>
+          <button class='icon-btn' data-act='edit' title='Edit'>⚙</button>
+          <button class='icon-btn' data-act='clone' title='Clone'>⧉</button>
+          <button class='icon-btn' data-act='delete' title='Delete'>✖</button>
+        </div>
+      `;
+      // drag events
+      card.addEventListener('dragstart', e=>{card.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', idx)});
+      card.addEventListener('dragend', ()=>card.classList.remove('dragging'));
+      card.addEventListener('dragover', e=>e.preventDefault());
+      card.addEventListener('drop', e=>{
+        e.preventDefault(); const from = Number(e.dataTransfer.getData('text/plain')); const to = Number(card.dataset.index);
+        reorderFields(from,to);
+      });
+      // controls
+      card.querySelectorAll('[data-act]').forEach(btn=>btn.addEventListener('click', ()=>{
+        const act = btn.dataset.act;
+        if(act==='edit') openEditModal(idx);
+        if(act==='clone'){ const copy = JSON.parse(JSON.stringify(state.schema.fields[idx])); copy.id = genId('fld'); copy.key = copy.key + '_copy'; state.schema.fields.splice(idx+1,0,copy); renderBuilder(); }
+        if(act==='delete'){ if(confirm('Delete this field?')){ state.schema.fields.splice(idx,1); renderBuilder(); }}
+      }))
+      fieldsEl.appendChild(card);
+    });
+  }
+
+  function reorderFields(from,to){
+    const arr = state.schema.fields;
+    if(from===to) return;
+    const [item] = arr.splice(from,1);
+    arr.splice(to,0,item);
+    renderBuilder();
+  }
+
+  // ---------- Modal Editor ----------
+  function openEditModal(idx){
+    state.editingIndex = idx;
+    const f = state.schema.fields[idx];
+    $('#modalTitle').textContent = `Edit Field — ${f.label}`;
+    $('#f_label').value = f.label; $('#f_key').value = f.key; $('#f_type').value = f.type;
+    $('#v_required').checked = f.required; $('#v_minlen').value = f.validations.minlen || '';
+    $('#v_maxlen').value = f.validations.maxlen || '';
+    $('#v_email').checked = f.validations.email; $('#v_password').checked = f.validations.password;
+    $('#f_default').value = f.default || '';
+    $('#f_derived').checked = f.derived; $('#f_parents').value = (f.parents||[]).join(','); $('#f_expr').value = f.expr || '';
+    $('#modal').classList.add('show');
+  }
+  function closeModal(){ $('#modal').classList.remove('show'); state.editingIndex=-1 }
+
+  function onSaveField(){
+    const idx = state.editingIndex; if(idx<0) return closeModal();
+    const f = state.schema.fields[idx];
+    const newF = {...f};
+    newF.label = $('#f_label').value || f.label; newF.key = $('#f_key').value || f.key; newF.type = $('#f_type').value;
+    newF.required = $('#v_required').checked;
+    newF.validations.minlen = valOrNull($('#v_minlen').value);
+    newF.validations.maxlen = valOrNull($('#v_maxlen').value);
+    newF.validations.email = $('#v_email').checked; newF.validations.password = $('#v_password').checked;
+    newF.default = $('#f_default').value;
+    newF.derived = $('#f_derived').checked;
+    newF.parents = $('#f_parents').value.split(',').map(s=>s.trim()).filter(Boolean);
+    newF.expr = $('#f_expr').value;
+    state.schema.fields[idx] = newF;
+    renderBuilder(); closeModal();
+  }
+  function onDeleteField(){ if(state.editingIndex>=0){ if(confirm('Delete field permanently?')){ state.schema.fields.splice(state.editingIndex,1); closeModal(); renderBuilder(); } } }
+
+  function valOrNull(v){ if(v===undefined||v===null||v==='') return null; return Number(v) }
+
+  // ---------- Save schema ----------
+  function onSaveForm(){
+    const forms = loadForms();
+    const name = $('#formName').value.trim() || prompt('Form name?','My Form');
+    state.schema.name = name;
+    const toSave = {...state.schema, createdAt: new Date().toISOString() };
+    forms.push(toSave);
+    saveForms(forms);
+    alert('Form saved! Open My Forms to view.');
+  }
+
+  // ---------- Routing & Stage ----------
+  function onHashChange(){ const h = location.hash || '#create'; const route = h.replace('#',''); state.route = route; $('#currentRoute').textContent = '/' + route; renderRoute(); }
+
+  function renderRoute(){
+    if(state.route==='create'){ $('#builderPanel').style.display='block'; $('#stage').innerHTML = `<div style="display:flex;flex-direction:column;gap:8px"><div class='small muted'>Create mode — build your form on the left. Preview will render current schema below.</div><div class='form-preview' id='livePreview'></div></div>`; renderLivePreview(); }
+    else if(state.route==='preview'){ $('#builderPanel').style.display='none'; renderPreviewRoute(); }
+    else if(state.route==='myforms'){ $('#builderPanel').style.display='none'; renderMyFormsRoute(); }
+  }
+
+  // Live preview on create page
+  function renderLivePreview(){ const el = $('#livePreview'); el.innerHTML=''; el.appendChild(renderFormElement(state.schema, {live:true})); }
+
+  // Render preview route - use the last saved form or the current built
+  function renderPreviewRoute(){ const forms = loadForms(); let schema;
+    if(forms.length===0 && state.schema.fields.length===0){ $('#stage').innerHTML = '<div class="small muted">No form found. Create one first.</div>'; return }
+    // prefer the most recently saved if available, else current
+    schema = forms.length? forms[forms.length-1]: state.schema;
+    $('#stage').innerHTML = '';
+    $('#stage').appendChild(renderFormElement(schema, {live:false, showSubmit:true}));
+  }
+
+  function renderMyFormsRoute(){ const forms = loadForms(); $('#stage').innerHTML = '';
+    const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.flexDirection='column'; wrap.style.gap='8px';
+    if(forms.length===0){ wrap.innerHTML = '<div class="small muted">No saved forms yet. Save a form to see it here.</div>'; $('#stage').appendChild(wrap); return }
+    forms.slice().reverse().forEach((fm, idx)=>{
+      const card = document.createElement('div'); card.className='field-card';
+      card.innerHTML = `<div style='flex:1'><div style='font-weight:700'>${escapeHtml(fm.name)}</div><div class='small muted'>Created: ${new Date(fm.createdAt).toLocaleString()}</div></div>
+      <div style='display:flex;gap:8px'><button class='btn' data-idx='${idx}'>Open</button><button class='btn secondary' data-del='${idx}'>Delete</button></div>`;
+      card.querySelector('[data-idx]').addEventListener('click', ()=>{ // open in preview
+        const forms = loadForms(); const target = forms[forms.length-1-idx]; // reverse order mapping
+        $('#stage').innerHTML=''; $('#stage').appendChild(renderFormElement(target, {live:false, showSubmit:true}));
+      });
+      card.querySelector('[data-del]').addEventListener('click', ()=>{
+        if(confirm('Delete saved form?')){
+          const forms = loadForms(); forms.splice(forms.length-1-idx,1); saveForms(forms); renderRoute();
+        }
+      });
+      wrap.appendChild(card);
+    });
+    $('#stage').appendChild(wrap);
+  }
+
+  // ---------- Form rendering & behaviour ----------
+  function renderFormElement(schema, opts={live:false, showSubmit:false}){
+    const container = document.createElement('div'); container.className='form-preview';
+    const form = document.createElement('form'); form.style.display='grid'; form.style.gap='12px';
+
+    // build map of field values for derived computation
+    const values = {};
+
+    // helper: update derived fields
+    function computeDerived(){
+      schema.fields.forEach(f=>{
+        if(f.derived){
+          try{
+            const expr = (f.expr||'').trim();
+            if(!expr) return;
+            // prepare context by replacing {key} placeholders with JSON-parsed values
+            let evalStr = expr.replaceAll('{','#{').replace(/#\{([a-zA-Z0-9_\-]+)\}/g, (m,k)=>{
+              const raw = values[k];
+              // if looks like a date string, leave as Date.parse raw
+              return raw===undefined? 'undefined' : JSON.stringify(raw);
+            });
+            // allow 'now' keyword
+            evalStr = evalStr.replaceAll('now', Date.now());
+            // evaluate safely using Function
+            const res = Function('return ('+evalStr+')')();
+            const el = form.querySelector(`[name="${f.key}"]`);
+            if(el){ el.value = res===undefined? '': String(res); values[f.key]=el.value; }
+          }catch(e){ console.warn('derived eval failed', e); }
+        }
+      });
+    }
+
+    // create field nodes
+    schema.fields.forEach((f, idx)=>{
+      const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.flexDirection='column';
+      const label = document.createElement('label'); label.textContent = f.label + (f.required?' *':'');
+      wrap.appendChild(label);
+      let input;
+      const commonAttrs = {name:f.key, dataset:{key:f.key}}
+      if(f.type==='textarea'){
+        input = document.createElement('textarea'); input.rows=3;
+      } else if(f.type==='select'){
+        input = document.createElement('select'); // parse options from default (comma separated)
+        const optsArr = (f.default||'').split(',').map(s=>s.trim()).filter(Boolean);
+        optsArr.forEach(o=>{const oel=document.createElement('option'); oel.value=o; oel.textContent=o; input.appendChild(oel)});
+      } else if(f.type==='radio'){
+        // radio: create a horizontal options set
+        const optsArr = (f.default||'').split(',').map(s=>s.trim()).filter(Boolean);
+        const row = document.createElement('div'); row.style.display='flex'; row.style.gap='8px';
+        optsArr.forEach(o=>{ const rid = genId('r'); const rlab = document.createElement('label'); rlab.innerHTML = `<input type='radio' name='${f.key}' value='${escapeHtml(o)}'> ${escapeHtml(o)}`; row.appendChild(rlab)});
+        input = row; // different
+      } else if(f.type==='checkbox'){
+        input = document.createElement('input'); input.type='checkbox'; input.value='on';
+      } else if(f.type==='date'){
+        input = document.createElement('input'); input.type='date';
+      } else if(f.type==='number'){
+        input = document.createElement('input'); input.type='number';
+      } else {
+        input = document.createElement('input'); input.type='text';
+      }
+
+      // attach name for simple inputs
+      if(input && input.tagName !== 'DIV' && input.type !== 'radio') input.name = f.key;
+
+      if(f.default && input && input.tagName !== 'DIV') input.value = f.default;
+
+      // validation UI helper
+      const err = document.createElement('div'); err.className='small muted'; err.style.color='#ffb4b4'; err.style.minHeight='18px';
+
+      // event handling
+      if(input){
+        const handler = (e)=>{
+          let v;
+          if(input.type==='checkbox') v = input.checked? input.value : '';
+          else v = input.value;
+          values[f.key] = v;
+          // recompute derived
+          computeDerived();
+          // show inline validation if live mode
+          if(opts.live) applyValidationSingle(f, input, err);
+        };
+        if(input.tagName==='DIV'){
+          // radio group: attach listener to each
+          input.querySelectorAll('input[type=radio]').forEach(r=>r.addEventListener('change', handler));
+        } else {
+          input.addEventListener('input', handler);
+          input.addEventListener('change', handler);
+        }
+      }
+
+      wrap.appendChild(input);
+      wrap.appendChild(err);
+      form.appendChild(wrap);
+      // set values map initial
+      if(input){ if(input.type==='checkbox') values[f.key] = input.checked? input.value : ''; else values[f.key] = input.value }
+    });
+
+    // submit
+    if(opts.showSubmit){
+      const btn = document.createElement('button'); btn.type='button'; btn.className='btn'; btn.textContent = 'Submit'; btn.addEventListener('click', ()=>{
+        const errors = validateForm(schema, form);
+        if(Object.keys(errors).length>0){ alert('Please fix errors.'); // focus first
+          const first = Object.keys(errors)[0]; const el = form.querySelector(`[name="${first}"]`); if(el) el.focus(); return; }
+        const payload = new FormData(form); const obj = {};
+        for(const [k,v] of payload.entries()){ obj[k]=v }
+        alert('Form submitted — see console for payload'); console.log('form submit payload', obj);
+      });
+      form.appendChild(btn);
+    }
+
+    container.appendChild(form);
+    // final compute derived once
+    computeDerived();
+    return container;
+  }
+
+  // validation helpers
+  function applyValidationSingle(field, el, errEl){ errEl.textContent='';
+    const v = el.type==='checkbox'? (el.checked? el.value : '') : el.value.trim();
+    if(field.required && (!v && v!=='0')){ errEl.textContent='This field is required'; return false }
+    if(field.validations.email){ const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; if(v && !re.test(v)){ errEl.textContent='Invalid email format'; return false }}
+    if(field.validations.password){ if(v && (v.length<8 || !/\d/.test(v))){ errEl.textContent='Password must be ≥8 chars and contain a number'; return false }}
+    if(field.validations.minlen && v.length < field.validations.minlen){ errEl.textContent=`Minimum length ${field.validations.minlen}`; return false }
+    if(field.validations.maxlen && v.length > field.validations.maxlen){ errEl.textContent=`Maximum length ${field.validations.maxlen}`; return false }
+    return true
+  }
+
+  function validateForm(schema, form){ const errors = {};
+    schema.fields.forEach(f=>{
+      const el = form.querySelector(`[name="${f.key}"]`);
+      if(!el) return;
+      const ok = applyValidationSingle(f, el, el.nextElementSibling || {textContent:''});
+      if(!ok) errors[f.key] = true;
+    });
+    return errors;
+  }
+
+  // ---------- My Forms modal (quick list) ----------
+  function renderMyFormsModal(){ const list = loadForms(); const cont = $('#savedFormsList'); cont.innerHTML='';
+    if(list.length===0){ cont.innerHTML='<div class="small muted">No saved forms.</div>'; return }
+    list.slice().reverse().forEach((f,idx)=>{
+      const card = document.createElement('div'); card.className='field-card'; card.innerHTML = `<div style='flex:1'><div style='font-weight:700'>${escapeHtml(f.name)}</div><div class='small muted'>${new Date(f.createdAt).toLocaleString()}</div></div><div style='display:flex;gap:8px'><button class='btn' data-open='${idx}'>Open</button><button class='btn secondary' data-delete='${idx}'>Delete</button></div>`;
+      card.querySelector('[data-open]').addEventListener('click', ()=>{ const forms = loadForms(); const target = forms[forms.length-1-idx]; $('#stage').innerHTML=''; $('#stage').appendChild(renderFormElement(target, {live:false, showSubmit:true})); $('#formsModal').classList.remove('show'); });
+      card.querySelector('[data-delete]').addEventListener('click', ()=>{ if(confirm('Delete saved form?')){ const arr = loadForms(); arr.splice(arr.length-1-idx,1); saveForms(arr); renderMyFormsModal(); }});
+      cont.appendChild(card);
+    });
+  }
+
+  $('#saveFormBtn').addEventListener('click', ()=>{ onSaveForm(); renderMyFormsModal(); });
+  $('#openPreviewBtn').addEventListener('click', ()=>{ location.hash='#preview' });
+  $('#openFormsBtn').addEventListener('click', ()=>{ renderMyFormsModal(); $('#formsModal').classList.add('show'); });
+
+  // utils
+  function escapeHtml(s){ if(!s) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }
+
+  // init on load
+  init();
+
+  </script>
+</body>
+</html>
